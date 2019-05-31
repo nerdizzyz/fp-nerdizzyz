@@ -1,0 +1,29 @@
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+options(scipen=999)
+```
+
+```{r}
+df <- read_csv("r_values_6446_claims.csv")
+```
+
+
+```{r}
+df <- df %>%
+  mutate(quad = num_of_studies * num_of_studies)
+
+df_less <- df %>%
+  filter(num_of_studies <= 50)
+
+df_less %>%
+  ggplot(aes(x=num_of_studies, y = diff)) + geom_point(alpha= 0.1)
+
+mod <- glm(data = df_less, sig_to_insig ~ num_of_studies, family = "binomial")
+summary(mod)
+
+sum(df_less$sig_to_insig)/ nrow(df_less)
+```
+
+

@@ -1,0 +1,197 @@
+---
+title: "r_value_example"
+author: "Donghyun Kang"
+
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(meta)
+library(metafor)
+```
+
+```{r}
+compute_r_value <- function(data_frame, fixed){
+  
+  #compute the original p-value using all studies
+  if (fixed == T){
+      m.bin <-metabin(event.e = X2,
+                     n.e= X4,
+                     event.c = X3,
+                     n.c = X5,
+                     data=data_frame,
+                     studlab=paste(X1),
+                     comb.fixed = T,
+                     comb.random = F,
+                     method.tau = "SJ",
+                     hakn = TRUE,
+                     prediction=TRUE,
+                     Subgroup = X6,
+                     incr = 0.5,
+                     method = "MH",
+                     warn = F,
+                     sm="RR")
+      
+      p_value <- m.bin$pval.fixed
+    }
+    
+  else{
+    m.bin<-metabin(event.e = X2,
+                     n.e= X4,
+                     event.c = X3,
+                     n.c = X5,
+                     data=data_frame,
+                     studlab=paste(X1),
+                     comb.fixed = F,
+                     comb.random = T,
+                     method.tau = "SJ",
+                     hakn = TRUE,
+                     prediction=TRUE,
+                     Subgroup = X6,
+                     incr = 0.5,
+                     method = "MH",
+                   warn = F,
+                     sm="RR")
+      
+      p_value <- m.bin$pval.random
+  }  
+  
+  num_iteration <- nrow(data_frame)
+  result_lst_z_value <- vector(length = num_iteration)
+  result_lst_p_value <- vector(length = num_iteration)
+
+  n <- 1
+  
+  if (fixed == T){
+    while (n <= num_iteration){
+      sub_df <- data_frame[ -c(n), ]
+      m.bin<-metabin(event.e = X2,
+              n.e= X4,
+              event.c = X3,
+              n.c = X5,
+              data=sub_df,
+              studlab=paste(X1),
+              comb.fixed = T,
+              comb.random = F,
+              method.tau = "SJ",
+              hakn = TRUE,
+              prediction=TRUE,
+              Subgroup = X6,
+              incr = 0.5,
+              method = "MH",
+              warn = F,
+              sm="RR")
+      
+      z_value <- m.bin$zval.fixed
+      p_value <- m.bin$pval.fixed
+      
+      result_lst_z_value[n] <- z_value
+      result_lst_p_value[n] <- p_value
+      n <- n + 1
+    }
+    
+    index <- which.max(result_lst_p_value)
+    r_value <- result_lst_p_value[index]
+  }
+  else{
+    while (n <= num_iteration){
+      sub_df <- data_frame[ -c(n), ]
+      m.bin<-metabin(event.e = X2,
+              n.e= X4,
+              event.c = X3,
+              n.c = X5,
+              data=sub_df,
+              studlab=paste(X1),
+              comb.fixed = F,
+              comb.random = T,
+              method.tau = "SJ",
+              hakn = TRUE,
+              prediction=TRUE,
+              Subgroup = X6,incr = 0.5,
+              method = "MH",
+              warn = F,
+              sm="RR")
+      
+      z_value <- m.bin$zval.random
+      p_value <- m.bin$pval.random
+      
+      result_lst_z_value[n] <- z_value
+      result_lst_p_value[n] <- p_value
+      n <- n + 1
+    }
+    
+    index <- which.max(result_lst_p_value)
+    r_value <- result_lst_p_value[index]
+  }
+  
+  excluded_study <- data_frame[index,]$X1
+  result <- c(p_value, r_value, excluded_study, num_iteration)
+  result
+}
+```
+
+
+```{r}
+df <- read_csv("outcome_more_than_2.txt")
+df$INDEX <- paste(df$REVIEW_NO,as.character(df$OUTCOME_NO), sep = "_")
+
+group_df <- df%>%
+  select(c("REVIEW_NO", "OUTCOME_NO",
+           "STUDY", "N_EVENTS1", "N_EVENTS2", "N_TOTAL1", "N_TOTAL2", 
+           "SUBGROUP", "RANDOM", "INDEX")) %>%
+  group_by(INDEX) %>%
+  mutate(g = group_indices())
+
+```
+
+```{r}
+max_index <- max(group_df$g)
+
+n <- 1
+list_for_result <- vector("list", max_index) 
+
+index_set <- group_df$INDEX
+index_set <- index_set[!duplicated(index_set)]
+names(list_for_result) <- index_set
+
+while (n <= max_index){
+    df <- group_df %>%
+         filter(g == n) %>%
+         ungroup()
+    
+    df$SUBGROUP <- replace_na(df$SUBGROUP, "None")
+
+    random_check <- df$RANDOM[1]
+    if (random_check == "YES"){
+      fixed = T
+    } else{
+      fixed = F
+    }
+    
+    input_df <- df %>%
+      select(c("STUDY", "N_EVENTS1", "N_EVENTS2", "N_TOTAL1", "N_TOTAL2", "SUBGROUP"))
+    
+    col_name_for_func <- c("X1", "X2", "X3" ,"X4" ,"X5", "X6")
+    names(input_df) <- col_name_for_func
+    
+    
+    return_for_compute <- compute_r_value(input_df, fixed)
+    
+    # print(return_for_compute)
+
+    result_for_df <- tibble("p-value" = c(as.numeric(return_for_compute[1])),
+                            "r-value" = c(as.numeric(return_for_compute[2])),
+                            "excluded_study"= c(return_for_compute[3]),
+                            "num_of_studie" = c(as.numeric(return_for_compute[4]))
+                            )
+
+    list_for_result[[n]] <- result_for_df
+    n <- n + 1
+    if (n  %% 100 == 0){
+    print(n)
+    }
+}
+
+final_result_r_value <- bind_rows(list_for_result,  .id = "REV_OUTCOME")
+write.csv(final_result_r_value, file = "r_values-total.txt", row.names = F) 
+```
